@@ -1,124 +1,67 @@
-import os
-import pickle
-
+﻿import streamlit as st
 import pandas as pd
-import streamlit as st
-from sklearn.linear_model import LinearRegression
-from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.metrics import accuracy_score, classification_report
+from sklearn.model_selection import train_test_split
 
-CSV_PATH = "Housing (2).csv"
-MODEL_PATH = "house_price_model.pkl"
-ENCODER_PATH = "lable_encoders.pkl"
-FEATURES = [
-    "area",
-    "bedrooms",
-    "bathrooms",
-    "stories",
-    "mainroad",
-    "guestroom",
-    "basement",
-    "hotwaterheating",
-    "airconditioning",
-    "parking",
-    "prefarea",
-    "furnishingstatus",
-]
-CATEGORICAL_COLUMNS = [
-    "mainroad",
-    "guestroom",
-    "basement",
-    "hotwaterheating",
-    "airconditioning",
-    "prefarea",
-    "furnishingstatus",
-]
-
+st.set_page_config(page_title="Diabetes Prediction", layout="wide")
 
 @st.cache_data
-def load_data() -> pd.DataFrame:
-    return pd.read_csv(CSV_PATH)
+def load_data():
+    return pd.read_csv("diabetes.csv")
 
+st.title("Diabetes Prediction Explorer")
+st.write("Use this app to explore the diabetes dataset and train a simple classifier.")
 
-def train_and_save_model():
-    df = load_data()
-    encoders = {}
-    encoded_df = df.copy()
+data = load_data()
 
-    for col in CATEGORICAL_COLUMNS:
-        encoder = LabelEncoder()
-        encoded_df[col] = encoder.fit_transform(encoded_df[col].astype(str))
-        encoders[col] = encoder
+st.sidebar.header("Options")
+show_data = st.sidebar.checkbox("Show raw dataset", value=True)
+show_summary = st.sidebar.checkbox("Show summary statistics", value=True)
+show_chart = st.sidebar.checkbox("Show feature distributions", value=False)
 
-    X = encoded_df[FEATURES]
-    y = encoded_df["price"]
+if show_data:
+    st.subheader("Raw data")
+    st.dataframe(data)
 
-    model = LinearRegression()
-    model.fit(X, y)
+if show_summary:
+    st.subheader("Dataset summary")
+    st.write(data.describe())
+    st.write("Outcome distribution:")
+    st.bar_chart(data["Outcome"].value_counts())
 
-    with open(MODEL_PATH, "wb") as f:
-        pickle.dump(model, f)
-    with open(ENCODER_PATH, "wb") as f:
-        pickle.dump(encoders, f)
+if show_chart:
+    st.subheader("Feature distributions")
+    selected_feature = st.selectbox(
+        "Select feature", [col for col in data.columns if col != "Outcome"]
+    )
+    st.write(data[selected_feature].describe())
+    st.bar_chart(data[selected_feature].value_counts())
 
-    return model, encoders
+st.sidebar.header("Model training")
+with st.sidebar.form(key="model_form"):
+    test_size = st.slider("Test set size", min_value=0.1, max_value=0.5, value=0.25, step=0.05)
+    n_estimators = st.slider("Random Forest trees", min_value=10, max_value=200, value=100, step=10)
+    submit = st.form_submit_button("Train model")
 
-
-def load_model_and_encoders():
-    if os.path.exists(MODEL_PATH) and os.path.exists(ENCODER_PATH):
-        with open(ENCODER_PATH, "rb") as f:
-            encoders = pickle.load(f)
-        with open(MODEL_PATH, "rb") as f:
-            model = pickle.load(f)
-        return model, encoders
-
-    return train_and_save_model()
-
-
-model, encoders = load_model_and_encoders()
-
-st.title("House Price Prediction")
-
-area = st.number_input("Area", value=3000)
-bedrooms = st.number_input("Bedrooms", value=3)
-bathrooms = st.number_input("Bathrooms", value=2)
-stories = st.number_input("Stories", value=2)
-
-mainroad = st.selectbox("Main Road", ["yes", "no"])
-guestroom = st.selectbox("Guest Room", ["yes", "no"])
-basement = st.selectbox("Basement", ["yes", "no"])
-hotwaterheating = st.selectbox("Hot Water Heating", ["yes", "no"])
-airconditioning = st.selectbox("Air Conditioning", ["yes", "no"])
-parking = st.number_input("Parking", value=2)
-prefarea = st.selectbox("Preferred Area", ["yes", "no"])
-
-furnishingstatus = st.selectbox(
-    "Furnishing Status",
-    ["furnished", "semi-furnished", "unfurnished"],
-)
-
-if st.button("Predict Price"):
-    input_df = pd.DataFrame(
-        [{
-            "area": area,
-            "bedrooms": bedrooms,
-            "bathrooms": bathrooms,
-            "stories": stories,
-            "mainroad": mainroad,
-            "guestroom": guestroom,
-            "basement": basement,
-            "hotwaterheating": hotwaterheating,
-            "airconditioning": airconditioning,
-            "parking": parking,
-            "prefarea": prefarea,
-            "furnishingstatus": furnishingstatus,
-        }]
+if submit:
+    X = data.drop(columns=["Outcome"])
+    y = data["Outcome"]
+    X_train, X_test, y_train, y_test = train_test_split(
+        X, y, test_size=test_size, random_state=42, stratify=y
     )
 
-    for col in CATEGORICAL_COLUMNS:
-        input_df[col] = encoders[col].transform(input_df[col].astype(str))
+    model = RandomForestClassifier(n_estimators=n_estimators, random_state=42)
+    model.fit(X_train, y_train)
 
-    st.subheader("Input")
-    st.dataframe(input_df)
+    y_pred = model.predict(X_test)
+    accuracy = accuracy_score(y_test, y_pred)
 
-    prediction = model.predict(input_df[FEATURES])[0]
-    st.success(f"Predicted House Price: {prediction:,.2f}")
+    st.subheader("Model results")
+    st.write(f"Accuracy: {accuracy:.3f}")
+    st.text("Classification report:")
+    st.text(classification_report(y_test, y_pred, digits=3))
+
+    st.subheader("Feature importances")
+    importance = pd.Series(model.feature_importances_, index=X.columns).sort_values(ascending=False)
+    st.bar_chart(importance)
